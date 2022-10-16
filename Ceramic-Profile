@@ -1,0 +1,250 @@
+import { React, useState } from "react";
+import { Link } from "react-router-dom";
+import { CeramicClient } from "@ceramicnetwork/http-client";
+import { getResolver } from "@ceramicnetwork/3id-did-resolver";
+import { EthereumAuthProvider, ThreeIdConnect } from "@3id/connect";
+import { DID } from "dids";
+import { IDX } from "@ceramicstudio/idx";
+import { Container } from "@mui/system";
+import { TextField, Button, Snackbar } from "@mui/material";
+import { ethers } from "ethers";
+import Web3Modal from "web3modal";
+import WalletConnectProvider from "@walletconnect/web3-provider";
+import { useNavigate } from "react-router-dom";
+
+const endpoint = "https://ceramic-clay.3boxlabs.com";
+let eth;
+
+const Home = () => {
+
+  const navigate = useNavigate();
+  const [account, SetAccount] = useState("");
+  const [profileName, SetProfileName] = useState("");
+  const [profileGender, SetProfileGender] = useState("");
+  const [connected, SetConnected] = useState(false);
+  const [snackOpen, SetSnackOpen] = useState(false);
+  const [snackMessage, SetSnackMessage] = useState("");
+  const [balance, SetBalance] = useState("");
+  const [network, setNetwork] = useState();
+  const [chainId, setChainId] = useState();
+  const [msg, setMsg] = useState();
+  const [image, setImage] = useState('')
+
+  const imageMimeType = /image\/(png|jpg|jpeg)/i;
+  //Start from Connect Wallet
+  async function connect() {
+    // Subscribe to accounts register
+    const addresses = await window.ethereum.request({
+      method: "eth_requestAccounts",
+    });
+    console.log('network ' + addresses);
+    return addresses;
+  }
+
+  // Web3modal what providers we have available. like MetaMask, Brave or Opera is added automatically by Web3modal
+  const providerOptions = {
+    walletconnect: {
+      package: WalletConnectProvider, // required
+      options: {
+        infuraId: 'a6e029b8d2ad43c49f2d00489dac65ac', // required
+      },
+    },
+  };
+  const web3Modal = new Web3Modal({
+    network: "mainnet", // optional
+    cacheProvider: false, // optional
+    providerOptions, // required
+    theme: "dark"
+  });
+
+  async function connectWalletClick() {
+
+    //multiple wallets
+    console.log(process.env);
+    // Get a Web3 Modal instance for the wallet
+    const provider = await web3Modal.connect();
+    eth = new ethers.providers.Web3Provider(provider);
+    const signer = eth.getSigner();
+    console.log("🚀 ~ file: Home.jsx ~ line 112 ~ connectWalletClick ~ signer", signer)
+    const address = await signer.getAddress();
+    console.log("🚀 ~ file: Home.jsx ~ line 114 ~ connectWalletClick ~ address", address)
+    const { name } = await eth.getNetwork();
+    setNetwork(name);
+    SetAccount(address);
+    SetConnected(true);
+  }
+
+  //End Wallet Connect
+
+
+  //Start User Profile
+  //Get Read Profile as per Save on User Profile 
+  async function getProfile() {
+    const [address] = await connect();
+    const ceramic = new CeramicClient(endpoint);
+    console.log("🚀 ~ file: App.js ~ line 34 ~ getProfile ~ ceramic", ceramic)
+    const idx = new IDX({ ceramic });
+
+    try {
+      const data = await idx.get("basicProfile", `${address}@eip155:1`);
+      console.log("data: ", data);
+
+      await window.ethereum.request({ method: 'eth_getBalance', params: [address, 'latest'] }).then(result => {
+        console.log(result);
+        let wei = parseInt(result, 16);
+        let balance = wei / (10 ** 18) + " ETH";
+        SetBalance(balance);
+      });
+      if (data.image) setImage(data.image)
+      SetProfileName(data.name);
+      SetProfileGender(data.gender);
+
+
+    } catch (error) {
+      console.log("error: ", error);
+    }
+  }
+  //End Read Profile
+  // Set Profile as Save on User Profile
+
+  async function setProfile() {
+    try {
+      const [address] = await connect();
+      const ceramic = new CeramicClient(endpoint);
+      const threeIdConnect = new ThreeIdConnect();
+      const provider = new EthereumAuthProvider(window.ethereum, address);
+
+      await threeIdConnect.connect(provider);
+
+      const did = new DID({
+        provider: threeIdConnect.getDidProvider(),
+        resolver: {
+          ...getResolver(ceramic),
+        },
+      });
+
+      ceramic.setDID(did);
+      await ceramic.did.authenticate();
+
+      const idx = new IDX({ ceramic });
+
+      var profileModel = {
+        name: profileName,
+        gender: profileGender,
+       // image: image,
+        image: {
+          original: {
+            src:"ipfs://bafy...",
+            mimeType: "image/png",
+            width: 500,
+            height: 200
+          }
+        },
+        url: "http://ceramic.network"
+      };
+
+      await idx.set("basicProfile", profileModel);
+
+      console.log("Your Profile Updated!");
+      SetSnackOpen(true);
+      SetSnackMessage("Your Profile Updated!");
+    } catch (error) {
+      console.log(error);
+      SetSnackOpen(true);
+      SetSnackMessage("Failed to Updated!");
+    }
+  }
+  //End Set Profile
+  //End User Profile
+
+  //Display Message When Profile update or not
+  async function handleSnackClose() {
+    SetSnackOpen(false);
+    SetSnackMessage("");
+  }
+
+  //Image Profile Save
+  function handleChange(e) {
+    console.log(e.target.files);
+    setImage(URL.createObjectURL(e.target.files[0]));
+    console.log(setImage);
+  }
+
+  return (
+    <div className="App">
+      <header className="App-header-connect">
+        {account === "" ? (
+          <Button variant="contained" size="small" onClick={connectWalletClick}>
+            Connect Wallet
+          </Button>
+        ) :
+          (
+            <><label>{account && "Your Address is " + account}</label>
+             
+              <label>{"Network : " + network}</label>
+              <Button variant="outlined" onClick={getProfile}>
+                Your Profile
+              </Button>
+              <br></br>
+              <Container>
+                <TextField
+                  sx={{
+                    input: {
+                      color: "white",
+                      border: "1px solid",
+                      borderRadius: "4px",
+                    },
+                  }}
+                  id="outlined-basic"
+                  placeholder="Name"
+                  value={profileName}
+                  onChange={(e) => SetProfileName(e.target.value)}
+                  color="secondary"
+                ></TextField>
+                <br></br>
+                <br></br>
+                <TextField
+                  sx={{
+                    input: {
+                      color: "white",
+                      border: "1px solid",
+                      borderRadius: "4px",
+                    },
+                  }}
+                  id="outlined-basic"
+                  placeholder="Gender"
+                  onChange={(e) => SetProfileGender(e.target.value)}
+                  value={profileGender}
+                  variant="outlined"
+                ></TextField>
+                <br></br>
+                <br></br>
+                <input type="file" placeholder="Profile Image" onChange={handleChange} />
+                {/* <input type="file" value={selectedFile} onChange={(e) => setSelectedFile(e.target.files[0])} /> */}
+                {image && <img style={{ width: '400px' }} src={image.URL} />}
+                <br></br>
+                <br></br>
+                <Button variant="outlined" onClick={setProfile}>
+                  {profileName ? "Update Profile" : "Set Profile"}
+                </Button>
+                <br></br>
+                <div id="imageViewerDiv"></div>
+              </Container></>
+
+          )}
+      </header>
+      <header className="App-header">
+        <Snackbar
+          anchorOrigin={{ vertical: "top", horizontal: "right" }}
+          open={snackOpen}
+          onClose={handleSnackClose}
+          message={snackMessage}
+          key="top right"
+        />
+      </header>
+    </div>
+  );
+
+};
+
+export default Home;
